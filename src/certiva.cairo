@@ -58,6 +58,12 @@ pub mod Certiva {
         pub issuer: ContractAddress,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct CertificateRevoked {
+        pub certificate_id: felt252,
+        pub reason: felt252 // e.g., "Certificate has been revoked"
+    }
+
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
@@ -66,6 +72,7 @@ pub mod Certiva {
         certificates_bulk_issued: BulkCertificatesIssued,
         CertificateFound: CertificateFound,
         CertificateNotFound: CertificateNotFound,
+        CertificateRevoked: CertificateRevoked,
     }
 
     #[abi(embed_v0)]
@@ -226,6 +233,47 @@ pub mod Certiva {
             }
 
             certificates_by_issuer
+        }
+
+        fn verify_certificate(
+            ref self: ContractState, certificate_id: felt252, hashed_key: ByteArray,
+        ) -> bool {
+            let certificate = self.certificates.read(certificate_id);
+
+            if certificate.hashed_key != hashed_key {
+                return false;
+            }
+
+            if certificate.isActive {
+                return true;
+            } else {
+                let reason: felt252 = 'Certificate has been revoked';
+                self
+                    .emit(
+                        Event::CertificateRevoked(
+                            CertificateRevoked { certificate_id: certificate_id, reason: reason },
+                        ),
+                    );
+                return false;
+            }
+        }
+
+        fn revoke_certificate(ref self: ContractState, certificate_id: felt252) {
+            let caller = get_caller_address();
+            let mut certificate = self.certificates.read(certificate_id);
+
+            assert(certificate.issuer_address == caller, 'Only issuer can revoke');
+            assert(certificate.isActive, 'Certificate already revoked');
+
+            certificate.isActive = false;
+            self.certificates.write(certificate_id, certificate.clone());
+            let reason: felt252 = 'Certificate has been revoked';
+            self
+                .emit(
+                    Event::CertificateRevoked(
+                        CertificateRevoked { certificate_id: certificate_id, reason: reason },
+                    ),
+                );
         }
     }
 }

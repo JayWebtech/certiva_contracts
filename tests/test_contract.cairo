@@ -385,7 +385,7 @@ mod tests {
         // Certificate data
         let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
         let hashed_key = "abcdef123456";
-        let certificate_id = "CS-2023-001";
+        let certificate_id = '1';
 
         // Clone before using in issue_certificate
         let cert_meta_clone1 = certificate_meta_data.clone();
@@ -397,19 +397,29 @@ mod tests {
         // make function call
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
         dispatcher.issue_certificate(cert_meta_clone1, hashed_key_clone1, cert_id_clone1);
+        let result = dispatcher.get_certicate_by_issuer();
+        assert(result.len() == 1, 'Certificate should be found');
 
         stop_cheat_caller_address(dispatcher.contract_address);
 
-        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
-
-        dispatcher.get_certicate_by_issuer();
-
-        let expected_event = Certiva::Event::CertificateFound(
-            Certiva::CertificateFound { issuer: university_wallet },
-        );
-        spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
-
-        stop_cheat_caller_address(dispatcher.contract_address);
+        spy
+            .assert_emitted(
+                @array![
+                    (
+                        dispatcher.contract_address,
+                        Certiva::Event::certificate_issued(
+                            Certiva::Certificate {
+                                certificate_meta_data,
+                                hashed_key,
+                                certificate_id,
+                                issuer_address: university_wallet,
+                                isActive: true,
+                                issuer_domain: "test.edu",
+                            },
+                        ),
+                    ),
+                ],
+            );
     }
 
     #[test]
@@ -434,5 +444,95 @@ mod tests {
         spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
 
         stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_verify_certificate_valid() {
+        let (owner, dispatcher) = setup();
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CS-2023-001';
+
+        // Issue certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher
+            .issue_certificate(
+                certificate_meta_data.clone(), hashed_key.clone(), certificate_id.clone(),
+            );
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Verify certificate (should be valid)
+        let result = dispatcher.verify_certificate(certificate_id.clone(), hashed_key.clone());
+        assert(result, 'Certificate should be valid');
+    }
+
+    #[test]
+    fn test_verify_certificate_invalid_hash() {
+        let (owner, dispatcher) = setup();
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+        let certificate_id: felt252 = 'CS-2023-001';
+
+        // Issue certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher
+            .issue_certificate(
+                certificate_meta_data.clone(), hashed_key.clone(), certificate_id.clone(),
+            );
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Verify certificate with wrong hash (should be invalid)
+        let wrong_hash = "wronghash";
+        let result = dispatcher.verify_certificate(certificate_id.clone(), wrong_hash);
+        assert(!result, 'Cert invalid or wrong hash');
+    }
+
+    #[test]
+    fn test_verify_certificate_revoked() {
+        let (owner, dispatcher) = setup();
+        let university_wallet = register_test_university(owner, dispatcher);
+        let mut spy = spy_events();
+
+        // Certificate data
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+        let certificate_id: felt252 = 'CS-2023-001';
+
+        // Issue certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher
+            .issue_certificate(
+                certificate_meta_data.clone(), hashed_key.clone(), certificate_id.clone(),
+            );
+
+        // Revoke certificate by setting isActive to false
+        dispatcher.revoke_certificate(certificate_id.clone());
+
+        // Verify certificate
+        let result = dispatcher.verify_certificate(certificate_id.clone(), hashed_key.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(!result, 'Cert should be revoked');
+
+        let expected_event = Certiva::Event::CertificateRevoked(
+            Certiva::CertificateRevoked { certificate_id, reason: 'Certificate has been revoked' },
+        );
+        spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
+    }
+
+    #[test]
+    fn test_verify_certificate_missing() {
+        let (owner, dispatcher) = setup();
+        // No certificate issued
+        let certificate_id: felt252 = 'NON-EXISTENT';
+        let hashed_key = "doesnotmatter";
+        let result = dispatcher.verify_certificate(certificate_id, hashed_key);
+        assert(!result, 'Cert not found or invalid');
     }
 }
