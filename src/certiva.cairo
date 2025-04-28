@@ -2,7 +2,7 @@
 pub mod Certiva {
     use core::array::ArrayTrait;
     use core::byte_array::ByteArray;
-    use core::starknet::storage::{
+    use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
@@ -58,6 +58,12 @@ pub mod Certiva {
         pub issuer: ContractAddress,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct CertificateRevoked {
+        pub certificate_id: felt252,
+        pub issuer: ContractAddress,
+    }
+
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
@@ -66,6 +72,7 @@ pub mod Certiva {
         certificates_bulk_issued: BulkCertificatesIssued,
         CertificateFound: CertificateFound,
         CertificateNotFound: CertificateNotFound,
+        CertificateRevoked: CertificateRevoked,
     }
 
     #[abi(embed_v0)]
@@ -226,6 +233,47 @@ pub mod Certiva {
             }
 
             certificates_by_issuer
+        }
+
+        fn revoke_certificate(
+            ref self: ContractState, certificate_id: felt252,
+        ) -> Result<(), felt252> {
+            let caller = get_caller_address();
+
+            // Check if caller is a registered university
+            let university = self.university.read(caller);
+            let zero_address = contract_address_const::<0>();
+            if university.wallet_address == zero_address {
+                return Result::Err('University not registered');
+            }
+
+            // Get certificate and verify it exists
+            let mut certificate = self.certificates.read(certificate_id);
+            if certificate.certificate_id == 0 {
+                return Result::Err('Certificate not found');
+            }
+
+            // Verify the caller is the issuer and domains match
+            if certificate.issuer_address != caller {
+                return Result::Err('Not certificate issuer');
+            }
+            if certificate.issuer_domain != university.website_domain {
+                return Result::Err('Domain mismatch');
+            }
+
+            // Revoke the certificate
+            certificate.isActive = false;
+            self.certificates.write(certificate_id, certificate);
+
+            // Emit event
+            self
+                .emit(
+                    Event::CertificateRevoked(
+                        CertificateRevoked { certificate_id, issuer: caller },
+                    ),
+                );
+
+            Result::Ok(())
         }
     }
 }

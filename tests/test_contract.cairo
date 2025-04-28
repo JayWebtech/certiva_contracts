@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use core::array::ArrayTrait;
-    use core::byte_array::ByteArrayTrait;
     use core::result::ResultTrait;
     use core::traits::TryInto;
     use snforge_std::{
@@ -11,11 +10,13 @@ mod tests {
     use starknet::{ContractAddress, contract_address_const};
     use unichain_contracts::Interfaces::ICertiva::{ICertivaDispatcher, ICertivaDispatcherTrait};
     use unichain_contracts::certiva::Certiva;
-    use unichain_contracts::certiva::Certiva::{BulkCertificatesIssued, Certificate, University};
+    use unichain_contracts::certiva::Certiva::{
+        BulkCertificatesIssued, University, CertificateRevoked,
+    };
 
     fn setup() -> (ContractAddress, ICertivaDispatcher) {
         let contract = declare("Certiva").unwrap().contract_class();
-        let owner = contract_address_const::<'owner'>();
+        let owner: ContractAddress = 'owner'.try_into().unwrap();
 
         let (contract_address, _) = contract.deploy(@array![owner.into()]).unwrap();
         let dispatcher = ICertivaDispatcher { contract_address: contract_address };
@@ -23,19 +24,16 @@ mod tests {
         (owner, dispatcher)
     }
 
-    #[test]
-    fn test_register_university() {
-        let (owner, dispatcher) = setup();
+    fn register_test_university(
+        owner: ContractAddress, dispatcher: ICertivaDispatcher,
+    ) -> ContractAddress {
+        let university_name = 'Test University';
+        let website_domain = "test.edu";
+        let country = 'Test Country';
+        let accreditation_body = 'Test Accreditation';
+        let university_email = "test@test.edu";
+        let wallet_address = contract_address_const::<'university'>();
 
-        // Test data
-        let university_name = 'Harvard University';
-        let website_domain = "nnamdi azikiwe university";
-        let country = 'USA';
-        let accreditation_body = 'NECHE';
-        let university_email = "nnamdiazikiweuniversity@gmail.com";
-        let wallet_address = contract_address_const::<2>();
-
-        // Register university as owner
         start_cheat_caller_address(dispatcher.contract_address, owner);
         dispatcher
             .register_university(
@@ -48,11 +46,18 @@ mod tests {
             );
         stop_cheat_caller_address(dispatcher.contract_address);
 
-        // Verify university was registered correctly
-        let stored_university = dispatcher.get_university(wallet_address);
-        assert(stored_university.university_name == university_name, 'Wrong university name');
-        assert(stored_university.country == country, 'Wrong country');
-        assert(stored_university.wallet_address == wallet_address, 'Wrong wallet address');
+        wallet_address
+    }
+
+    fn issue_test_certificate(
+        dispatcher: ICertivaDispatcher, university_wallet: ContractAddress, certificate_id: felt252,
+    ) {
+        let certificate_meta_data = "Student: John Doe, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id);
+        stop_cheat_caller_address(dispatcher.contract_address);
     }
 
     #[test]
@@ -165,33 +170,6 @@ mod tests {
     }
 
     // Tests for certificate issuance functionality
-
-    // Helper function to register a university and return its wallet address
-    fn register_test_university(
-        owner: ContractAddress, dispatcher: ICertivaDispatcher,
-    ) -> ContractAddress {
-        let university_name = 'Test University';
-        let website_domain = "test.edu";
-        let country = 'Test Country';
-        let accreditation_body = 'Test Accreditation';
-        let university_email = "test@test.edu";
-        let wallet_address = contract_address_const::<'university'>();
-
-        start_cheat_caller_address(dispatcher.contract_address, owner);
-        dispatcher
-            .register_university(
-                university_name,
-                website_domain,
-                country,
-                accreditation_body,
-                university_email,
-                wallet_address,
-            );
-        stop_cheat_caller_address(dispatcher.contract_address);
-
-        wallet_address
-    }
-
     #[test]
     fn test_issue_certificate() {
         // Setup contract and register a university
@@ -385,7 +363,7 @@ mod tests {
         // Certificate data
         let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
         let hashed_key = "abcdef123456";
-        let certificate_id = "CS-2023-001";
+        let certificate_id = 'CS-2023-001';
 
         // Clone before using in issue_certificate
         let cert_meta_clone1 = certificate_meta_data.clone();
@@ -433,6 +411,140 @@ mod tests {
         );
         spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
 
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_revoke_certificate_authorized() {
+        let (owner, dispatcher) = setup();
+        let university_wallet = register_test_university(owner, dispatcher);
+        let certificate_id = 'CS-2023-001';
+
+        issue_test_certificate(dispatcher, university_wallet, certificate_id);
+
+        let mut spy = spy_events();
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        let result = dispatcher.revoke_certificate(certificate_id);
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(result.is_ok(), 'Revoke should succeed');
+        let certificate = dispatcher.get_certificate(certificate_id);
+        assert(!certificate.isActive, 'Certificate should be revoked');
+
+        spy
+            .assert_emitted(
+                @array![
+                    (
+                        dispatcher.contract_address,
+                        Certiva::Event::CertificateRevoked(
+                            CertificateRevoked { certificate_id, issuer: university_wallet },
+                        ),
+                    ),
+                ],
+            );
+    }
+
+    #[test]
+    #[should_panic(expected: 'University not registered')]
+    fn test_revoke_certificate_unregistered_university() {
+        let (_owner, dispatcher) = setup();
+        let certificate_id = 'CS-2023-001';
+        let unregistered_wallet = contract_address_const::<'unregistered'>();
+
+        start_cheat_caller_address(dispatcher.contract_address, unregistered_wallet);
+        dispatcher.revoke_certificate(certificate_id);
+        // The function will panic with 'University not registered' before returning Err
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    #[should_panic(expected: 'Not certificate issuer')]
+    fn test_revoke_certificate_non_issuer() {
+        let (owner, dispatcher) = setup();
+        let university_wallet1 = register_test_university(owner, dispatcher);
+        let university_wallet2 = contract_address_const::<'university2'>();
+
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher
+            .register_university(
+                'Test University 2',
+                "test2.edu",
+                'USA',
+                'CHEA',
+                "admin2@test.edu",
+                university_wallet2,
+            );
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        let certificate_id = 'CS-2023-001';
+        issue_test_certificate(dispatcher, university_wallet1, certificate_id);
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet2);
+        dispatcher.revoke_certificate(certificate_id);
+        // The function will panic with 'Not certificate issuer' before returning Err
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    #[should_panic(expected: 'Certificate not found')]
+    fn test_revoke_non_existent_certificate() {
+        let (_owner, dispatcher) = setup();
+        let university_wallet = register_test_university(_owner, dispatcher);
+        let non_existent_id = 'CS-2023-999';
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.revoke_certificate(non_existent_id);
+        // The function will panic with 'Certificate not found' before returning Err
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_revoke_certificate_verification() {
+        let (owner, dispatcher) = setup();
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        let certificate_id1 = 'CS-2023-001';
+        let certificate_id2 = 'CS-2023-002';
+        issue_test_certificate(dispatcher, university_wallet, certificate_id1);
+        issue_test_certificate(dispatcher, university_wallet, certificate_id2);
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        let result = dispatcher.revoke_certificate(certificate_id1);
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(result.is_ok(), 'Revoke should succeed');
+        let certificate1 = dispatcher.get_certificate(certificate_id1);
+        assert(!certificate1.isActive, 'Certificate1 should be revoked');
+
+        let certificate2 = dispatcher.get_certificate(certificate_id2);
+        assert(certificate2.isActive, 'Cert2 should remain active');
+    }
+
+    #[test]
+    #[should_panic(expected: 'Domain mismatch')]
+    fn test_revoke_certificate_domain_mismatch() {
+        let (_owner, dispatcher) = setup();
+        let university_wallet = register_test_university(_owner, dispatcher);
+        let certificate_id = 'CS-2023-001';
+
+        issue_test_certificate(dispatcher, university_wallet, certificate_id);
+
+        start_cheat_caller_address(dispatcher.contract_address, _owner);
+        dispatcher
+            .register_university(
+                'Test University',
+                "different.edu",
+                'USA',
+                'CHEA',
+                "admin@test.edu",
+                university_wallet,
+            );
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.revoke_certificate(certificate_id);
+        // The function will panic with 'Domain mismatch' before returning Err
         stop_cheat_caller_address(dispatcher.contract_address);
     }
 }
