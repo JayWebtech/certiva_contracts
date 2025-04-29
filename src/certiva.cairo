@@ -204,8 +204,11 @@ pub mod Certiva {
         }
 
         // Function to get certificate details by certificate ID
-        fn get_certificate(self: @ContractState, certificate_id: felt252) -> Certificate {
-            self.certificates.read(certificate_id)
+        fn get_certificate_by_id(self: @ContractState, certificate_id: felt252) -> Certificate {
+            let certificate: Certificate = self.certificates.read(certificate_id);
+            // Check if the certificate exists
+            assert(certificate.certificate_id == certificate_id, 'Certificate not found');
+            certificate
         }
 
         // Function to get Certificate details by issuer address
