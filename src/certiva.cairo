@@ -2,7 +2,7 @@
 pub mod Certiva {
     use core::array::ArrayTrait;
     use core::byte_array::ByteArray;
-    use core::starknet::storage::{
+    use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
@@ -61,7 +61,7 @@ pub mod Certiva {
     #[derive(Drop, starknet::Event)]
     pub struct CertificateRevoked {
         pub certificate_id: felt252,
-        pub reason: felt252 // e.g., "Certificate has been revoked"
+        pub issuer: ContractAddress,
     }
 
     #[event]
@@ -204,8 +204,11 @@ pub mod Certiva {
         }
 
         // Function to get certificate details by certificate ID
-        fn get_certificate(self: @ContractState, certificate_id: felt252) -> Certificate {
-            self.certificates.read(certificate_id)
+        fn get_certificate_by_id(self: @ContractState, certificate_id: felt252) -> Certificate {
+            let certificate: Certificate = self.certificates.read(certificate_id);
+            // Check if the certificate exists
+            assert(certificate.certificate_id == certificate_id, 'Certificate not found');
+            certificate
         }
 
         // Function to get Certificate details by issuer address
@@ -258,22 +261,45 @@ pub mod Certiva {
             }
         }
 
-        fn revoke_certificate(ref self: ContractState, certificate_id: felt252) {
+        fn revoke_certificate(
+            ref self: ContractState, certificate_id: felt252,
+        ) -> Result<(), felt252> {
             let caller = get_caller_address();
+
+            // Check if caller is a registered university
+            let university = self.university.read(caller);
+            let zero_address = contract_address_const::<0>();
+            if university.wallet_address == zero_address {
+                return Result::Err('University not registered');
+            }
+
+            // Get certificate and verify it exists
             let mut certificate = self.certificates.read(certificate_id);
+            if certificate.certificate_id == 0 {
+                return Result::Err('Certificate not found');
+            }
 
-            assert(certificate.issuer_address == caller, 'Only issuer can revoke');
-            assert(certificate.isActive, 'Certificate already revoked');
+            // Verify the caller is the issuer and domains match
+            if certificate.issuer_address != caller {
+                return Result::Err('Not certificate issuer');
+            }
+            if certificate.issuer_domain != university.website_domain {
+                return Result::Err('Domain mismatch');
+            }
 
+            // Revoke the certificate
             certificate.isActive = false;
-            self.certificates.write(certificate_id, certificate.clone());
-            let reason: felt252 = 'Certificate has been revoked';
+            self.certificates.write(certificate_id, certificate);
+
+            // Emit event
             self
                 .emit(
                     Event::CertificateRevoked(
-                        CertificateRevoked { certificate_id: certificate_id, reason: reason },
+                        CertificateRevoked { certificate_id, issuer: caller },
                     ),
                 );
+
+            Result::Ok(())
         }
     }
 }
