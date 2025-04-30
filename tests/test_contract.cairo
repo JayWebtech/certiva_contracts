@@ -11,7 +11,7 @@ mod tests {
     use unichain_contracts::Interfaces::ICertiva::{ICertivaDispatcher, ICertivaDispatcherTrait};
     use unichain_contracts::certiva::Certiva;
     use unichain_contracts::certiva::Certiva::{
-        BulkCertificatesIssued, University, CertificateRevoked,
+        BulkCertificatesIssued, CertificateRevoked, University,
     };
 
     fn setup() -> (ContractAddress, ICertivaDispatcher) {
@@ -274,6 +274,7 @@ mod tests {
         // Setup contract and register a university
         let (owner, dispatcher) = setup();
         let university_wallet = register_test_university(owner, dispatcher);
+        let mut spy = spy_events();
 
         // Prepare certificate data arrays
         let mut meta_data_array = ArrayTrait::new();
@@ -288,7 +289,6 @@ mod tests {
         cert_id_array.append('CS-2023-001');
         cert_id_array.append('ENG-2023-001');
 
-        let mut spy = spy_events();
 
         // Issue certificates in bulk
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
@@ -357,6 +357,7 @@ mod tests {
     fn test_get_certificate_by_issuer_found() {
         // Deploy the contract
         let (owner, dispatcher) = setup();
+        let mut spy = spy_events();
 
         let university_wallet = register_test_university(owner, dispatcher);
 
@@ -364,14 +365,13 @@ mod tests {
         let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
         let hashed_key = "abcdef123456";
 
-        let certificate_id = 'CS-2023-001';
+        let certificate_id = 1;
 
         // Clone before using in issue_certificate
         let cert_meta_clone1 = certificate_meta_data.clone();
         let hashed_key_clone1 = hashed_key.clone();
         let cert_id_clone1 = certificate_id.clone();
 
-        let mut spy = spy_events();
 
         // make function call
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
@@ -388,7 +388,7 @@ mod tests {
         let expected_event = Certiva::Event::CertificateFound(
             Certiva::CertificateFound { issuer: university_wallet },
         );
-        //spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
+        spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
 
         stop_cheat_caller_address(dispatcher.contract_address);
     }
@@ -440,7 +440,7 @@ mod tests {
         assert(result, 'Certificate should be valid');
     }
 
- 
+
     fn test_revoke_certificate_authorized() {
         let (owner, dispatcher) = setup();
         let university_wallet = register_test_university(owner, dispatcher);
@@ -464,7 +464,11 @@ mod tests {
                     (
                         dispatcher.contract_address,
                         Certiva::Event::CertificateRevoked(
-                            CertificateRevoked { certificate_id, issuer: university_wallet },
+                            CertificateRevoked {
+                                certificate_id,
+                                issuer: university_wallet,
+                                reason: 'Certificate has been revoked',
+                            },
                         ),
                     ),
                 ],
@@ -479,7 +483,8 @@ mod tests {
         let unregistered_wallet = contract_address_const::<'unregistered'>();
 
         start_cheat_caller_address(dispatcher.contract_address, unregistered_wallet);
-        dispatcher.revoke_certificate(certificate_id);
+        let result = dispatcher.revoke_certificate(certificate_id);
+        assert(result.is_err(), 'Should fail getting certificate');
         // The function will mnot panic with 'University not registered' before returning Err
         stop_cheat_caller_address(dispatcher.contract_address);
     }
@@ -542,16 +547,18 @@ mod tests {
     fn test_verify_certificate_revoked() {
         let (owner, dispatcher) = setup();
         let university_wallet = register_test_university(owner, dispatcher);
-        let mut spy = spy_events();
-        
+
         let certificate_id = 'CS-2023-001';
         let non_existent_id = 'CS-2023-002';
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+
         // Issue the certificate
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
         dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
         // Retrieve the certificate by ID
-        dispatcher.revoke_certificate(non_existent_id);
-        // The function will panic with 'Certificate not found' before returning Err
+        let result = dispatcher.revoke_certificate(non_existent_id);
+        assert(result.is_err(), 'Should fail for non-exist cert');
         stop_cheat_caller_address(dispatcher.contract_address);
     }
 
@@ -610,11 +617,12 @@ mod tests {
         let (owner, dispatcher) = setup();
         // Register a university
         let university_wallet = register_test_university(owner, dispatcher);
+        let mut spy = spy_events();
 
         // Certificate data
         let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
         let hashed_key = "abcdef123456";
-        
+
         let certificate_id: felt252 = 'CS-2023-001';
 
         // Issue certificate
@@ -625,16 +633,19 @@ mod tests {
             );
 
         // Revoke certificate by setting isActive to false
-        dispatcher.revoke_certificate(certificate_id.clone());
+        let result = dispatcher.revoke_certificate(certificate_id.clone());
+        assert(result.is_ok(), 'Revoke should succeed');
 
         // Verify certificate
-        let result = dispatcher.verify_certificate(certificate_id.clone(), hashed_key.clone());
+        let stored_certificate = dispatcher.get_certificate_by_id(certificate_id);
         stop_cheat_caller_address(dispatcher.contract_address);
 
-        assert(!result, 'Cert should be revoked');
+        assert(!stored_certificate.isActive, 'Cert should be revoked');
 
         let expected_event = Certiva::Event::CertificateRevoked(
-            Certiva::CertificateRevoked { certificate_id, reason: 'Certificate has been revoked' },
+            Certiva::CertificateRevoked {
+                certificate_id, issuer: university_wallet, reason: 'Certificate has been revoked',
+            },
         );
         spy.assert_emitted(@array![(dispatcher.contract_address, expected_event)]);
     }
@@ -647,8 +658,12 @@ mod tests {
         let hashed_key = "doesnotmatter";
         let result = dispatcher.verify_certificate(certificate_id, hashed_key);
         assert(!result, 'Cert not found or invalid');
-        
+
         let certificate_id = 'CS-2023-001';
+
+        let university_wallet = register_test_university(owner, dispatcher);
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
 
         // Issue the certificate
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);

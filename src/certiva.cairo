@@ -62,6 +62,7 @@ pub mod Certiva {
     pub struct CertificateRevoked {
         pub certificate_id: felt252,
         pub issuer: ContractAddress,
+        pub reason: felt252,
     }
 
     #[event]
@@ -254,7 +255,11 @@ pub mod Certiva {
                 self
                     .emit(
                         Event::CertificateRevoked(
-                            CertificateRevoked { certificate_id: certificate_id, reason: reason },
+                            CertificateRevoked {
+                                certificate_id: certificate_id,
+                                issuer: certificate.issuer_address,
+                                reason: reason,
+                            },
                         ),
                     );
                 return false;
@@ -292,10 +297,11 @@ pub mod Certiva {
             self.certificates.write(certificate_id, certificate);
 
             // Emit event
+            let reason: felt252 = 'Certificate has been revoked';
             self
                 .emit(
                     Event::CertificateRevoked(
-                        CertificateRevoked { certificate_id, issuer: caller },
+                        CertificateRevoked { certificate_id, issuer: caller, reason: reason },
                     ),
                 );
 
