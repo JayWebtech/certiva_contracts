@@ -30,5 +30,8 @@ pub trait ICertiva<TContractState> {
 
     fn get_certificate_by_id(self: @TContractState, certificate_id: felt252) -> Certificate;
     fn get_certicate_by_issuer(ref self: TContractState) -> Array<Certificate>;
+    fn verify_certificate(
+        ref self: TContractState, certificate_id: felt252, hashed_key: ByteArray,
+    ) -> bool;
     fn revoke_certificate(ref self: TContractState, certificate_id: felt252) -> Result<(), felt252>;
 }

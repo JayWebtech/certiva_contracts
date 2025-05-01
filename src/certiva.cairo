@@ -62,6 +62,7 @@ pub mod Certiva {
     pub struct CertificateRevoked {
         pub certificate_id: felt252,
         pub issuer: ContractAddress,
+        pub reason: felt252,
     }
 
     #[event]
@@ -238,6 +239,33 @@ pub mod Certiva {
             certificates_by_issuer
         }
 
+        fn verify_certificate(
+            ref self: ContractState, certificate_id: felt252, hashed_key: ByteArray,
+        ) -> bool {
+            let certificate = self.certificates.read(certificate_id);
+
+            if certificate.hashed_key != hashed_key {
+                return false;
+            }
+
+            if certificate.isActive {
+                return true;
+            } else {
+                let reason: felt252 = 'Certificate has been revoked';
+                self
+                    .emit(
+                        Event::CertificateRevoked(
+                            CertificateRevoked {
+                                certificate_id: certificate_id,
+                                issuer: certificate.issuer_address,
+                                reason: reason,
+                            },
+                        ),
+                    );
+                return false;
+            }
+        }
+
         fn revoke_certificate(
             ref self: ContractState, certificate_id: felt252,
         ) -> Result<(), felt252> {
@@ -269,10 +297,11 @@ pub mod Certiva {
             self.certificates.write(certificate_id, certificate);
 
             // Emit event
+            let reason: felt252 = 'Certificate has been revoked';
             self
                 .emit(
                     Event::CertificateRevoked(
-                        CertificateRevoked { certificate_id, issuer: caller },
+                        CertificateRevoked { certificate_id, issuer: caller, reason: reason },
                     ),
                 );
 
