@@ -34,4 +34,7 @@ pub trait ICertiva<TContractState> {
         ref self: TContractState, certificate_id: felt252, hashed_key: ByteArray,
     ) -> bool;
     fn revoke_certificate(ref self: TContractState, certificate_id: felt252) -> Result<(), felt252>;
+    fn pause_contract(ref self: TContractState);
+    fn unpause_contract(ref self: TContractState);
+    fn check_if_paused(self: @TContractState) -> bool;
 }

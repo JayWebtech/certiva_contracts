@@ -289,7 +289,6 @@ mod tests {
         cert_id_array.append('CS-2023-001');
         cert_id_array.append('ENG-2023-001');
 
-
         // Issue certificates in bulk
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
         dispatcher.bulk_issue_certificates(meta_data_array, hashed_key_array, cert_id_array);
@@ -371,7 +370,6 @@ mod tests {
         let cert_meta_clone1 = certificate_meta_data.clone();
         let hashed_key_clone1 = hashed_key.clone();
         let cert_id_clone1 = certificate_id.clone();
-
 
         // make function call
         start_cheat_caller_address(dispatcher.contract_address, university_wallet);
@@ -746,5 +744,357 @@ mod tests {
         // Retrieve the certificate with wrong id
         let _stored_certificate = dispatcher.get_certificate_by_id(wrong_certificate_id);
         stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_pause_contract() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Check that the contract is paused
+        let is_paused = dispatcher.check_if_paused();
+        assert(is_paused, 'Contract is not paused');
+    }
+
+    #[test]
+    #[should_panic(expected: 'Not the owner')]
+    fn test_pause_contract_as_non_admin() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Pause the contract as non-owner
+        let non_owner = contract_address_const::<'non_owner'>();
+        start_cheat_caller_address(dispatcher.contract_address, non_owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Check that the contract is paused
+        let is_paused = dispatcher.check_if_paused();
+        assert(is_paused, 'Contract is not paused');
+    }
+
+
+    #[test]
+    #[should_panic(expected: 'Contract is paused already')]
+    fn test_pause_contract_should_panic_if_done_twice() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Try to pause the contract again
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+
+    #[test]
+    #[should_panic(expected: 'Contract is paused already')]
+    fn test_attempt_to_call_function_should_fail_after_contract_is_paused() {
+        // Deploy the contract
+        let (owner, dispatcher) = setup();
+
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Usman Alfaki, Degree: Computer Science";
+        let hashed_key = "abcdef123456";
+
+        let certificate_id = 1;
+
+        // Clone before using in issue_certificate
+        let cert_meta_clone1 = certificate_meta_data.clone();
+        let hashed_key_clone1 = hashed_key.clone();
+        let cert_id_clone1 = certificate_id.clone();
+
+        // Pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // make function call
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(cert_meta_clone1, hashed_key_clone1, cert_id_clone1);
+        let result = dispatcher.get_certicate_by_issuer();
+        assert(result.len() == 1, 'Certificate should be found');
+
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+
+        dispatcher.get_certicate_by_issuer();
+        // // Deploy the contract
+    // let (owner, dispatcher) = setup();
+    // // Register a university
+    // let university_wallet = register_test_university(owner, dispatcher);
+
+        // // Certificate data 1
+    // let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+    // let hashed_key = "abcdef123456";
+    // let certificate_id = 'CS-2023-013';
+
+        // // Pause the contract
+    // start_cheat_caller_address(dispatcher.contract_address, owner);
+    // dispatcher.pause_contract();
+    // stop_cheat_caller_address(dispatcher.contract_address);
+
+        // // Issue the certificate 1
+    // start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+    // dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+    // stop_cheat_caller_address(dispatcher.contract_address);
+
+        // // Retrieve the certificate by ID
+    // let stored_certificate = dispatcher.get_certificate_by_id(certificate_id);
+    // // assert that certificate is active
+    // assert(stored_certificate.isActive, 'Certificate should be active');
+
+        //  // Certificate data 2
+    // let certificate_meta_data = "Student: Ning Caileen, Degree: Computer Science";
+    // let hashed_key = "abcdef123456";
+    // let certificate_id = 'CS-2023-017';
+
+        // // Attempt to Issue the certificate 2
+    // // This should panic
+    // dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+
+        // // Retrieve the certificate by ID
+    // let stored_certificate = dispatcher.get_certificate_by_id(certificate_id);
+    // // assert that certificate is active
+    // assert(stored_certificate.isActive, 'Certificate should be active');
+
+    }
+
+    #[test]
+    fn test_unpause_contract() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(dispatcher.check_if_paused(), 'Contract is not paused');
+
+        // Unpause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.unpause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(!dispatcher.check_if_paused(), 'Contract is still paused');
+    }
+
+    #[test]
+    #[should_panic(expected: 'Not the owner')]
+    fn test_unpause_contract_as_non_owner() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        assert(dispatcher.check_if_paused(), 'Contract is not paused');
+
+        // Try to unpause contract as non-owner
+        let non_owner = contract_address_const::<'non_owner'>();
+        start_cheat_caller_address(dispatcher.contract_address, non_owner);
+        dispatcher.unpause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_use_function_after_contract_has_been_unpaused() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Now pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        let is_paused = dispatcher.check_if_paused();
+        // Check if the contract was paused
+        assert(is_paused, 'Contract is not paused');
+
+        //  Unpause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.unpause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Check if contract was unpaused
+        let is_paused = dispatcher.check_if_paused();
+        assert(!is_paused, 'Contract is still paused');
+
+        // Retrieve the certificate by ID
+        let stored_certificate = dispatcher.get_certificate_by_id(certificate_id);
+        stop_cheat_caller_address(dispatcher.contract_address);
+    }
+
+    #[test]
+    fn test_emmission_of_event_after_pausing() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // setup event spy
+        let mut spy = spy_events();
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Now pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        //Check the emission of the event
+        spy
+            .assert_emitted(
+                @array![
+                    (
+                        dispatcher.contract_address,
+                        Certiva::Event::PausedContract(Certiva::PausedContract { is_paused: true }),
+                    ),
+                ],
+            );
+    }
+
+    #[test]
+    fn test_emmission_of_event_after_unpausing() {
+        // Deploy the contract with the admin as the owner
+        let (owner, dispatcher) = setup();
+        // Register a university
+        let university_wallet = register_test_university(owner, dispatcher);
+
+        // Certificate data
+        let certificate_meta_data = "Student: Dinah Macaulay, Degree: Chemical Engineering";
+        let hashed_key = "abcdef123456";
+        let certificate_id = 'CE-2023-013';
+
+        // setup event spy
+        let mut spy = spy_events();
+
+        // Issue the certificate
+        start_cheat_caller_address(dispatcher.contract_address, university_wallet);
+        dispatcher.issue_certificate(certificate_meta_data, hashed_key, certificate_id.clone());
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        // Now pause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.pause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        let is_paused = dispatcher.check_if_paused();
+        // Check if the contract was paused
+        assert(is_paused, 'Contract is not paused');
+
+        //  Unpause the contract
+        start_cheat_caller_address(dispatcher.contract_address, owner);
+        dispatcher.unpause_contract();
+        stop_cheat_caller_address(dispatcher.contract_address);
+
+        //  Now check the emission of the event for unpausing contract
+        spy
+            .assert_emitted(
+                @array![
+                    (
+                        dispatcher.contract_address,
+                        Certiva::Event::UnpausedContract(
+                            Certiva::UnpausedContract { is_paused: false },
+                        ),
+                    ),
+                ],
+            );
     }
 }
