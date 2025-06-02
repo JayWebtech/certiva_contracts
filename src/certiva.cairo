@@ -15,10 +15,12 @@ pub mod Certiva {
         owner: ContractAddress,
         university: Map<ContractAddress, University>,
         certificates: Map<felt252, Certificate>,
+        is_paused: bool,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
+        assert(owner != contract_address_const::<0>(), 'Owner cannot be zero address');
         self.owner.write(owner);
     }
 
@@ -65,6 +67,16 @@ pub mod Certiva {
         pub reason: felt252,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct PausedContract {
+        pub is_paused: bool,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct UnpausedContract {
+        pub is_paused: bool,
+    }
+
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
@@ -74,6 +86,8 @@ pub mod Certiva {
         CertificateFound: CertificateFound,
         CertificateNotFound: CertificateNotFound,
         CertificateRevoked: CertificateRevoked,
+        PausedContract: PausedContract,
+        UnpausedContract: UnpausedContract,
     }
 
     #[abi(embed_v0)]
@@ -89,6 +103,9 @@ pub mod Certiva {
             university_email: ByteArray,
             wallet_address: ContractAddress,
         ) {
+            // Ensure the contract is not paused
+            self.assert_not_paused();
+
             // Check that caller is the owner
             let caller = get_caller_address();
             let owner = self.owner.read();
@@ -138,6 +155,9 @@ pub mod Certiva {
             hashed_key: ByteArray,
             certificate_id: felt252,
         ) {
+            // Ensure the contract is not paused
+            self.assert_not_paused();
+
             let caller = get_caller_address();
 
             let university = self.university.read(caller);
@@ -164,6 +184,9 @@ pub mod Certiva {
             hashed_key_array: Array<ByteArray>,
             certificate_id_array: Array<felt252>,
         ) {
+            // Ensure the contract is not paused
+            self.assert_not_paused();
+
             let caller = get_caller_address();
 
             let university = self.university.read(caller);
@@ -242,6 +265,9 @@ pub mod Certiva {
         fn verify_certificate(
             ref self: ContractState, certificate_id: felt252, hashed_key: ByteArray,
         ) -> bool {
+            // Ensure the contract is not paused
+            self.assert_not_paused();
+
             let certificate = self.certificates.read(certificate_id);
 
             if certificate.hashed_key != hashed_key {
@@ -269,6 +295,9 @@ pub mod Certiva {
         fn revoke_certificate(
             ref self: ContractState, certificate_id: felt252,
         ) -> Result<(), felt252> {
+            // Ensure the contract is not paused
+            self.assert_not_paused();
+
             let caller = get_caller_address();
 
             // Check if caller is a registered university
@@ -306,6 +335,44 @@ pub mod Certiva {
                 );
 
             Result::Ok(())
+        }
+
+        fn pause_contract(ref self: ContractState) {
+            // Ensure the contract can only be called by owner
+            let caller = get_caller_address();
+            assert(caller == self.owner.read(), 'Not the owner');
+            // Check if contract has been paused
+            assert(!self.is_paused.read(), 'Contract is paused already');
+            // Set paused state to true
+            self.is_paused.write(true);
+            // Emit event
+            self.emit(Event::PausedContract(PausedContract { is_paused: true }));
+        }
+
+        fn unpause_contract(ref self: ContractState) {
+            // Ensure only owner can unpause contract
+            let caller = get_caller_address();
+            assert(caller == self.owner.read(), 'Not the owner');
+
+            // Change pause state to false
+            self.is_paused.write(false);
+            // Emit event
+            self.emit(Event::UnpausedContract(UnpausedContract { is_paused: false }));
+        }
+
+        fn check_if_paused(self: @ContractState) -> bool {
+            self.is_paused.read()
+        }
+    }
+
+    #[generate_trait]
+    pub impl Internal of InternalTrait {
+        // this is where the internal functions are defined
+        // Internal view functions are used to check state of contract
+        // Takes `@self` as it only needs to read state
+        // Can only be called by other functions within the contract
+        fn assert_not_paused(self: @ContractState) {
+            assert(!self.is_paused.read(), 'Contract is paused already');
         }
     }
 }
