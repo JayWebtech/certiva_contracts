@@ -7,7 +7,21 @@ pub mod Certiva {
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, contract_address_const, get_caller_address};
+    use starknet::class_hash::ClassHash;
     use crate::Interfaces::ICertiva::ICertiva;
+    use openzeppelin_access::ownable::OwnableComponent;
+    use openzeppelin_upgrades::UpgradeableComponent;
+    use openzeppelin_upgrades::interface::IUpgradeable;
+
+    component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
+    component!(path: UpgradeableComponent, storage: upgradeable, event: UpgradeableEvent);
+
+
+    #[abi(embed_v0)]
+    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
+    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+
+    impl UpgradeableInternalImpl = UpgradeableComponent::InternalImpl<ContractState>;
 
 
     #[storage]
@@ -16,12 +30,16 @@ pub mod Certiva {
         university: Map<ContractAddress, University>,
         certificates: Map<felt252, Certificate>,
         is_paused: bool,
+        #[substorage(v0)]
+        ownable: OwnableComponent::Storage,
+        #[substorage(v0)]
+        upgradeable: UpgradeableComponent::Storage,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
         assert(owner != contract_address_const::<0>(), 'Owner cannot be zero address');
-        self.owner.write(owner);
+        self.ownable.initializer(owner);
     }
 
     #[derive(Drop, Serde, starknet::Event, starknet::Store)]
@@ -88,6 +106,10 @@ pub mod Certiva {
         CertificateRevoked: CertificateRevoked,
         PausedContract: PausedContract,
         UnpausedContract: UnpausedContract,
+         #[flat]
+        OwnableEvent: OwnableComponent::Event,
+        #[flat]
+        UpgradeableEvent: UpgradeableComponent::Event,
     }
 
     #[abi(embed_v0)]
@@ -373,6 +395,14 @@ pub mod Certiva {
         // Can only be called by other functions within the contract
         fn assert_not_paused(self: @ContractState) {
             assert(!self.is_paused.read(), 'Contract is paused already');
+        }
+    }
+
+    #[abi(embed_v0)]
+    impl UpgradeableImpl of IUpgradeable<ContractState> {
+        fn upgrade(ref self: ContractState, new_class_hash: ClassHash) {
+            self.ownable.assert_only_owner();
+            self.upgradeable.upgrade(new_class_hash);
         }
     }
 }
